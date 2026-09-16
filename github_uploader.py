@@ -264,3 +264,28 @@ def upload_zip(content: bytes, archive_name: str = "archive.zip", game_name: str
         }
 
     return {"uploaded": uploaded_paths, "skipped": skipped, "failed": []}
+def commit_code_file(filename: str, content: bytes) -> dict:
+    """
+    Заменяет файл кода в корне репозитория (не в covers/).
+    Используется для само-патча бота.
+    """
+    try:
+        existing = _repo.get_contents(filename, ref=GITHUB_BRANCH)
+        _repo.update_file(
+            path=filename,
+            message=f"[self-patch] update {filename}",
+            content=content,
+            sha=existing.sha,
+            branch=GITHUB_BRANCH,
+        )
+    except GithubException as e:
+        if e.status == 404:
+            _repo.create_file(
+                path=filename,
+                message=f"[self-patch] create {filename}",
+                content=content,
+                branch=GITHUB_BRANCH,
+            )
+        else:
+            raise
+    return {"path": filename}
