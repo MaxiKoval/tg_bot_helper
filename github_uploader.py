@@ -118,17 +118,20 @@ def _commit_many(files: dict, message: str) -> None:
     ref.edit(new_commit.sha)
 
 
-def _folder_for_game(game_name: str) -> str:
-    """
-    Возвращает путь подпапки (без GITHUB_PATH), например 'a1' или 'a2'.
-    """
-    name = (game_name or "").strip()
-    if not name:
-        return ""
-    first = _translit(name[0]).lower()
+def _first_letter_key(source: str) -> str:
+    """Берёт первую букву из строки (транслит, lower). Если не буква — 'x'."""
+    s = (source or "").strip()
+    if not s:
+        return "x"
+    first = _translit(s[0]).lower()
     if not first.isalpha():
-        first = "x"
+        return "x"
+    return first
 
+
+def _folder_for_game(game_name: str) -> str:
+    """Возвращает имя подпапки: 'a1', 'a2', ... по первой букве."""
+    first = _first_letter_key(game_name)
     base = GITHUB_PATH.strip("/")
     base_for_api = base if base else "."
 
@@ -167,15 +170,33 @@ def _folder_for_game(game_name: str) -> str:
     return f"{first}{max_n + 1}"
 
 
+def _pick_subfolder(game_name: str, filename: str) -> str:
+    """
+    Определяет подпапку (a1/a2/...).
+    Если подпись (game_name) есть — по ней.
+    Иначе — по имени файла, но не для технических имён (photo_, file_, uuid).
+    """
+    name = (game_name or "").strip()
+    if name:
+        return _folder_for_game(name)
+
+    base = (filename or "").rsplit("/", 1)[-1]
+    low = base.lower()
+    if low.startswith("photo_") or low.startswith("file_"):
+        return ""
+    if re.fullmatch(r"[0-9a-f]{8,}\.[a-z0-9]+", low):
+        return ""
+    if not base:
+        return ""
+    return _folder_for_game(base)
+
+
 def upload_image(content: bytes, filename: str, game_name: str = "") -> dict:
     safe = _safe_filename(filename)
+    sub = _pick_subfolder(game_name, filename)
 
-    if game_name:
-        sub = _folder_for_game(game_name)
-        if GITHUB_PATH:
-            full_path = f"{GITHUB_PATH.strip('/')}/{sub}/{safe}"
-        else:
-            full_path = f"{sub}/{safe}"
+    if sub:
+        full_path = f"{GITHUB_PATH.strip('/')}/{sub}/{safe}" if GITHUB_PATH else f"{sub}/{safe}"
     else:
         full_path = f"{GITHUB_PATH.strip('/')}/{safe}" if GITHUB_PATH else safe
 
@@ -202,8 +223,6 @@ def upload_zip(content: bytes, archive_name: str = "archive.zip", game_name: str
     uploaded_paths = []
     skipped = []
     total_size = 0
-
-    sub = _folder_for_game(game_name) if game_name else ""
     base = GITHUB_PATH.strip("/")
 
     with zf:
@@ -226,13 +245,17 @@ def upload_zip(content: bytes, archive_name: str = "archive.zip", game_name: str
                 raise RuntimeError(
                     f"Распакованный размер превышает {MAX_TOTAL_SIZE // 1024 // 1024} МБ"
                 )
+
             base_name = name.rsplit("/", 1)[-1]
             safe = _safe_filename(base_name)
-            safe = _unique_name(safe, used_names)
+            sub = _pick_subfolder(game_name, safe)
+
             if sub:
                 full_path = f"{base}/{sub}/{safe}" if base else f"{sub}/{safe}"
             else:
                 full_path = f"{base}/{safe}" if base else safe
+
+            full_path = _unique_path(full_path, used_names)
             files[full_path] = zf.read(info)
             uploaded_paths.append(full_path)
 
@@ -250,3 +273,21 @@ def upload_zip(content: bytes, archive_name: str = "archive.zip", game_name: str
         }
 
     return {"uploaded": uploaded_paths, "skipped": skipped, "failed": []}
+
+
+def _unique_path(full_path: str, used: set) -> str:
+    if full_path not in used:
+        used.add(full_path)
+        return full_path
+    folder, _, filename = full_path.rpartition("/")
+    base, dot, ext = filename.rpartition(".")
+    if not dot:
+        base, ext = filename, ""
+    counter = 1
+    while True:
+        candidate_name = f"{base}_{counter}.{ext}" if ext else f"{base}_{counter}"
+        candidate = f"{folder}/{candidate_name}" if folder else candidate_name
+        if candidate not in used:
+            used.add(candidate)
+            return candidate
+        counter += 1
