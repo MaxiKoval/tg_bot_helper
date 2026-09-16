@@ -118,16 +118,9 @@ def _commit_many(files: dict, message: str) -> None:
     ref.edit(new_commit.sha)
 
 
-# ====== Логика "папка по первой букве игры + 500 файлов ======
-
 def _folder_for_game(game_name: str) -> str:
     """
     Возвращает путь подпапки (без GITHUB_PATH), например 'a1' или 'a2'.
-    Логика:
-      - берём первую букву из названия игры (транслит, lower)
-      - ищем в GITHUB_PATH папки вида <letter><N>
-      - если в последней < 500 файлов — используем её
-      - иначе создаём следующую (letter)(N+1)
     """
     name = (game_name or "").strip()
     if not name:
@@ -139,7 +132,6 @@ def _folder_for_game(game_name: str) -> str:
     base = GITHUB_PATH.strip("/")
     base_for_api = base if base else "."
 
-    # Получить список элементов в базовой папке
     try:
         items = _repo.get_contents(base_for_api, ref=GITHUB_BRANCH)
     except GithubException as e:
@@ -176,10 +168,6 @@ def _folder_for_game(game_name: str) -> str:
 
 
 def upload_image(content: bytes, filename: str, game_name: str = "") -> dict:
-    """
-    Если game_name задан — кладём в подпапку по первой букве (a1, a2, ...).
-    Иначе — прямо в GITHUB_PATH.
-    """
     safe = _safe_filename(filename)
 
     if game_name:
@@ -193,8 +181,6 @@ def upload_image(content: bytes, filename: str, game_name: str = "") -> dict:
 
     return _upload_single(content, full_path)
 
-
-# ====== ZIP ======
 
 def _is_skippable(name: str) -> bool:
     base = name.rsplit("/", 1)[-1]
@@ -264,28 +250,3 @@ def upload_zip(content: bytes, archive_name: str = "archive.zip", game_name: str
         }
 
     return {"uploaded": uploaded_paths, "skipped": skipped, "failed": []}
-def commit_code_file(filename: str, content: bytes) -> dict:
-    """
-    Заменяет файл кода в корне репозитория (не в covers/).
-    Используется для само-патча бота.
-    """
-    try:
-        existing = _repo.get_contents(filename, ref=GITHUB_BRANCH)
-        _repo.update_file(
-            path=filename,
-            message=f"[self-patch] update {filename}",
-            content=content,
-            sha=existing.sha,
-            branch=GITHUB_BRANCH,
-        )
-    except GithubException as e:
-        if e.status == 404:
-            _repo.create_file(
-                path=filename,
-                message=f"[self-patch] create {filename}",
-                content=content,
-                branch=GITHUB_BRANCH,
-            )
-        else:
-            raise
-    return {"path": filename}
