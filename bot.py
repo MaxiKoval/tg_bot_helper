@@ -31,15 +31,13 @@ async def _reply(msg, text: str, **kwargs):
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await _reply(
         update.message,
-        "Привет! Я умею:\n"
-        "• 📷 Загружать фото\n"
-        "• 📎 Загружать файлы (с именем)\n"
-        "• 📦 Распаковывать ZIP-архивы с картинками\n\n"
-        "💡 Добавь подпись к фото = название игры. "
-        "Например, <b>Among Us</b> → фото уйдёт в <code>covers/a1</code> "
-        "(первая буква). Когда в папке наберётся 500 фото — создастся <code>a2</code>.\n\n"
-        "Команды:\n"
-        "/clear — удалить сообщения бота из чата",
+        "Привет! Я загружаю фото на GitHub.\n\n"
+        "<b>Логика папок:</b>\n"
+        "• Подпись к фото = название игры. <code>Among Us</code> → <code>covers/a1/</code>\n"
+        "• Если подписи нет — беру первую букву из имени файла.\n"
+        "• Когда в папке наберётся 500 файлов — создам <code>a2</code>.\n\n"
+        "<b>Команды:</b>\n"
+        "/clear — удалить сообщения бота",
         parse_mode="HTML",
     )
 
@@ -60,9 +58,8 @@ async def clear(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         text=(
             f"🧹 Удалено сообщений бота: {deleted}\n"
             + (f"⚠️ Не удалось: {failed} (старше 48 часов)\n" if failed else "")
-            + "\n⚠️ Telegram Bot API <b>не даёт</b> боту удалять ваши "
-            "сообщения и файлы. Чтобы стереть всё — откройте меню чата (⋮) → "
-            "<b>Clear history</b>."
+            + "\n⚠️ Telegram Bot API <b>не даёт</b> боту удалять ваши сообщения. "
+            "Чтобы стереть всё — меню чата (⋮) → <b>Clear history</b>."
         ),
         parse_mode="HTML",
     )
@@ -89,7 +86,7 @@ async def handle_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if not doc.mime_type or not doc.mime_type.startswith("image/"):
-        await _reply(update.message, "Принимаю только изображения и ZIP-архивы 🤔")
+        await _reply(update.message, "Принимаю только изображения и ZIP 🤔")
         return
 
     await update.message.chat.send_action(ChatAction.UPLOAD_PHOTO)
@@ -106,10 +103,7 @@ async def _handle_zip(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     doc = msg.document
 
     if doc.file_size and doc.file_size > 20 * 1024 * 1024:
-        await _reply(
-            msg,
-            "⚠️ Файл больше 20 МБ. Telegram Bot API не отдаёт такие файлы ботам.",
-        )
+        await _reply(msg, "⚠️ Файл больше 20 МБ. Разделите архив.")
         return
 
     game_name = (msg.caption or "").strip()
@@ -121,7 +115,7 @@ async def _handle_zip(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         content = bytes(await tg_file.download_as_bytearray())
     except Exception as e:
         log.exception("Download failed")
-        await _reply(msg, f"❌ Не удалось скачать файл: {e}")
+        await _reply(msg, f"❌ Не удалось скачать: {e}")
         return
 
     try:
