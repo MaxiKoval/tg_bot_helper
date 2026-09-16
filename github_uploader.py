@@ -39,8 +39,10 @@ def _translit(text: str) -> str:
 
 
 def _safe_filename(filename: str) -> str:
+    """Оставляет только ASCII: буквы, цифры, точку, дефис, подчёркивание."""
     filename = _translit(filename)
-    filename = re.sub(r"[^\w.\-]+", "_", filename)
+    filename = re.sub(r"[^A-Za-z0-9._\-]+", "_", filename)
+    filename = re.sub(r"_+", "_", filename)
     filename = filename.strip("._")
     if not filename:
         filename = uuid.uuid4().hex[:12] + ".jpg"
@@ -118,20 +120,31 @@ def _commit_many(files: dict, message: str) -> None:
     ref.edit(new_commit.sha)
 
 
-def _first_letter_key(source: str) -> str:
-    """Берёт первую букву из строки (транслит, lower). Если не буква — 'x'."""
-    s = (source or "").strip()
-    if not s:
-        return "x"
-    first = _translit(s[0]).lower()
-    if not first.isalpha():
-        return "x"
-    return first
+# ============ Логика подпапок ============
+
+def _first_letter(source: str) -> str:
+    """
+    Первая БУКВА в строке.
+    Пропускает цифры, дефисы, подчёркивания, пробелы, точки и любые другие
+    не-буквенные символы в начале. Кириллица транслитерируется заранее.
+    Если буквы вообще нет — 'x'.
+    """
+    s = _translit(source or "")
+    for ch in s:
+        if ch.isascii() and ch.isalpha():
+            return ch.lower()
+    return "x"
 
 
-def _folder_for_game(game_name: str) -> str:
-    """Возвращает имя подпапки: 'a1', 'a2', ... по первой букве."""
-    first = _first_letter_key(game_name)
+def _folder_for_game(source: str) -> str:
+    """
+    Возвращает имя подпапки: a1, b2, f5, ...
+    Логика:
+      - первая буква слова (после транслита и пропуска не-букв)
+      - ищем <letter><N> в covers/
+      - если в последней < 500 файлов — берём её, иначе создаём N+1
+    """
+    first = _first_letter(source)
     base = GITHUB_PATH.strip("/")
     base_for_api = base if base else "."
 
@@ -172,23 +185,26 @@ def _folder_for_game(game_name: str) -> str:
 
 def _pick_subfolder(game_name: str, filename: str) -> str:
     """
-    Определяет подпапку (a1/a2/...).
-    Если подпись (game_name) есть — по ней.
-    Иначе — по имени файла, но не для технических имён (photo_, file_, uuid).
+    Определяем подпапку:
+    - если есть подпись — по ней;
+    - иначе — по имени файла (без расширения);
+    - для технических имён (photo_*, file_*, uuid) — пусто, кладём в covers/.
     """
     name = (game_name or "").strip()
     if name:
         return _folder_for_game(name)
 
     base = (filename or "").rsplit("/", 1)[-1]
-    low = base.lower()
+    stem = base.rsplit(".", 1)[0]
+    low = stem.lower()
+
     if low.startswith("photo_") or low.startswith("file_"):
         return ""
-    if re.fullmatch(r"[0-9a-f]{8,}\.[a-z0-9]+", low):
+    if re.fullmatch(r"[0-9a-f]{8,}", low):
         return ""
-    if not base:
+    if not stem:
         return ""
-    return _folder_for_game(base)
+    return _folder_for_game(stem)
 
 
 def upload_image(content: bytes, filename: str, game_name: str = "") -> dict:
@@ -212,6 +228,24 @@ def _is_skippable(name: str) -> bool:
     return False
 
 
+def _unique_path(full_path: str, used: set) -> str:
+    if full_path not in used:
+        used.add(full_path)
+        return full_path
+    folder, _, filename = full_path.rpartition("/")
+    base, dot, ext = filename.rpartition(".")
+    if not dot:
+        base, ext = filename, ""
+    counter = 1
+    while True:
+        candidate_name = f"{base}_{counter}.{ext}" if ext else f"{base}_{counter}"
+        candidate = f"{folder}/{candidate_name}" if folder else candidate_name
+        if candidate not in used:
+            used.add(candidate)
+            return candidate
+        counter += 1
+
+
 def upload_zip(content: bytes, archive_name: str = "archive.zip", game_name: str = "") -> dict:
     try:
         zf = zipfile.ZipFile(io.BytesIO(content))
@@ -219,7 +253,7 @@ def upload_zip(content: bytes, archive_name: str = "archive.zip", game_name: str
         raise RuntimeError("Файл не является корректным ZIP-архивом")
 
     files = {}
-    used_names = set()
+    used_paths = set()
     uploaded_paths = []
     skipped = []
     total_size = 0
@@ -255,7 +289,7 @@ def upload_zip(content: bytes, archive_name: str = "archive.zip", game_name: str
             else:
                 full_path = f"{base}/{safe}" if base else safe
 
-            full_path = _unique_path(full_path, used_names)
+            full_path = _unique_path(full_path, used_paths)
             files[full_path] = zf.read(info)
             uploaded_paths.append(full_path)
 
@@ -273,21 +307,3 @@ def upload_zip(content: bytes, archive_name: str = "archive.zip", game_name: str
         }
 
     return {"uploaded": uploaded_paths, "skipped": skipped, "failed": []}
-
-
-def _unique_path(full_path: str, used: set) -> str:
-    if full_path not in used:
-        used.add(full_path)
-        return full_path
-    folder, _, filename = full_path.rpartition("/")
-    base, dot, ext = filename.rpartition(".")
-    if not dot:
-        base, ext = filename, ""
-    counter = 1
-    while True:
-        candidate_name = f"{base}_{counter}.{ext}" if ext else f"{base}_{counter}"
-        candidate = f"{folder}/{candidate_name}" if folder else candidate_name
-        if candidate not in used:
-            used.add(candidate)
-            return candidate
-        counter += 1
