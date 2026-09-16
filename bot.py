@@ -1,3 +1,14 @@
+import os
+import httpx
+from github_uploader import upload_image, upload_zip, commit_code_file
+
+TELEGRAM_ADMIN_ID = int(os.getenv("TELEGRAM_ADMIN_ID", "0") or "0")
+RAILWAY_TOKEN = os.getenv("RAILWAY_TOKEN", "")
+RAILWAY_SERVICE_ID = os.getenv("RAILWAY_SERVICE_ID", "")
+RAILWAY_ENVIRONMENT_ID = os.getenv("RAILWAY_ENVIRONMENT_ID", "")
+
+RAILWAY_API = "https://backboard.railway.app/graphql/v2"
+PATCH_EXTENSIONS = (".py", ".txt", ".json", ".md")
 import logging
 import asyncio
 from datetime import datetime
